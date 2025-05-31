@@ -1,142 +1,149 @@
-import React, { useEffect, useState } from "react";
+import { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import { db } from "../firebase";
-import {
-  doc,
-  onSnapshot,
-  setDoc,
-  serverTimestamp,
-  addDoc,
-  collection,
-  query,
-  orderBy,
-  deleteDoc,
-  onSnapshot as onSnapshotList,
-} from "firebase/firestore";
+import { doc, onSnapshot, setDoc, serverTimestamp } from "firebase/firestore";
+
+import { createEditor, type BaseText, type Descendant } from "slate";
+import { Slate, Editable, withReact } from "slate-react";
+
+import { Container, Box, Typography, CircularProgress } from "@mui/material";
 
 const docId = "shared_note";
 
-export default function SharedNote() {
-  const [text, setText] = useState("");
-  const [loading, setLoading] = useState(true);
-  const [savedNotes, setSavedNotes] = useState<
-    { id: string; content: string; created?: Date }[]
-  >([]);
+const initialValue: BaseText[] = [{ text: "" }];
 
-  // 실시간 공유 메모 구독
+export default function SharedNote() {
+  const [value, setValue] = useState<Descendant[]>(initialValue);
+  const [loading, setLoading] = useState(true);
+  const [isSaving, setIsSaving] = useState(false);
+  const [isSomeoneTyping, setIsSomeoneTyping] = useState(false);
+
+  const editor = useMemo(() => withReact(createEditor()), []);
+  const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  const typingDocRef = doc(db, "notes", docId + "_typing");
+  const isTypingRef = useRef(false);
+  const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  const setTypingStatus = useCallback(
+    async (typing: boolean) => {
+      if (isTypingRef.current !== typing) {
+        isTypingRef.current = typing;
+        await setDoc(
+          typingDocRef,
+          { isTyping: typing, updatedAt: serverTimestamp() },
+          { merge: true }
+        );
+      }
+    },
+    [typingDocRef]
+  );
+
+  const scheduleSave = useCallback((newValue: Descendant[]) => {
+    if (saveTimeoutRef.current) {
+      clearTimeout(saveTimeoutRef.current);
+    }
+
+    saveTimeoutRef.current = setTimeout(async () => {
+      setIsSaving(true);
+      await setDoc(doc(db, "notes", docId), {
+        content: newValue,
+        updatedAt: serverTimestamp(),
+      });
+
+      setTimeout(() => {
+        setIsSaving(false);
+      }, 2000);
+    }, 1000);
+  }, []);
+
+  const onChange = useCallback(
+    (newValue: Descendant[]) => {
+      setValue(newValue);
+      scheduleSave(newValue);
+
+      if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+
+      if (!isTypingRef.current) {
+        setTypingStatus(true);
+      }
+
+      typingTimeoutRef.current = setTimeout(() => {
+        setTypingStatus(false);
+      }, 2000);
+    },
+    [scheduleSave, setTypingStatus]
+  );
+
   useEffect(() => {
     const unsub = onSnapshot(doc(db, "notes", docId), (docSnap) => {
       if (docSnap.exists()) {
-        setText(docSnap.data().content);
+        setValue(docSnap.data().content ?? initialValue);
       } else {
-        setText("");
+        setValue(initialValue);
       }
       setLoading(false);
     });
     return () => unsub();
   }, []);
 
-  // 저장된 메모 리스트 구독
   useEffect(() => {
-    const q = query(collection(db, "notes_list"), orderBy("created", "desc"));
-    const unsub = onSnapshotList(q, (snapshot) => {
-      const notes = snapshot.docs.map((doc) => {
-        const data = doc.data();
-        return {
-          id: doc.id,
-          content: data.content ?? "",
-          created: data.created?.toDate ? data.created.toDate() : data.created,
-        };
-      });
-      setSavedNotes(notes);
+    const unsub = onSnapshot(typingDocRef, (docSnap) => {
+      if (docSnap.exists()) {
+        const data = docSnap.data();
+        setIsSomeoneTyping(data.isTyping ?? false);
+      } else {
+        setIsSomeoneTyping(false);
+      }
     });
     return () => unsub();
-  }, []);
-
-  const onChange = async (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-    const newText = e.target.value;
-    setText(newText);
-    await setDoc(doc(db, "notes", docId), {
-      content: newText,
-      updatedAt: serverTimestamp(),
-    });
-  };
-
-  const saveNote = async () => {
-    if (text.trim() === "") return;
-    await addDoc(collection(db, "notes_list"), {
-      content: text,
-      created: new Date(),
-    });
-    setText("");
-    await setDoc(doc(db, "notes", docId), {
-      content: "",
-      updatedAt: serverTimestamp(),
-    });
-  };
-
-  const deleteNote = async (id: string) => {
-    await deleteDoc(doc(db, "notes_list", id));
-  };
-
-  if (loading) return <div>불러오는 중...</div>;
+  }, [typingDocRef]);
 
   return (
-    <div className="p-4 max-w-6xl mx-auto">
-      <div className="flex flex-col md:flex-row gap-4">
-        {/* Left: Input Area */}
-        <div className="flex-1">
-          <label className="block text-sm font-medium text-gray-600 mb-1">
-            ✍️ 메모 작성
-          </label>
-          <textarea
-            value={text}
-            onChange={onChange}
-            className="w-full h-40 p-2 border rounded resize-none"
-            placeholder="공동으로 작성 중인 메모"
-          />
-          <button
-            onClick={saveNote}
-            className="mt-2 px-4 py-2 bg-blue-500 text-white rounded"
-          >
-            저장
-          </button>
-        </div>
+    <Container
+      gap={2}
+      component={Box}
+      display={"flex"}
+      flexDirection="column"
+      width={"100%"}
+      p={3}
+    >
+      <Box display="flex" alignItems="center" gap={2} mb={2}>
+        <Typography variant="h5" fontWeight={700}>
+          뚜동 Wedding Live Notes
+        </Typography>
+        {isSaving && (
+          <Box display="flex" alignItems="center" gap={1}>
+            <Typography variant="body2" color="text.secondary">
+              저장 중입니다...
+            </Typography>
+            <CircularProgress size={16} thickness={4} color="info" />
+          </Box>
+        )}
 
-        {/* Right: Realtime Preview */}
-        <div className="flex-1">
-          <label className="block text-sm font-medium text-gray-600 mb-1">
-            📝 실시간 미리보기
-          </label>
-          <div className="w-full h-40 p-2 border rounded bg-gray-50 overflow-y-auto whitespace-pre-wrap">
-            {text || <span className="text-gray-400">내용 없음</span>}
-          </div>
-        </div>
-      </div>
-
-      <hr className="my-6" />
-
-      {/* 저장된 메모 목록 */}
-      <h2 className="text-lg font-bold mb-2">📚 저장된 메모들</h2>
-      {savedNotes.length === 0 ? (
-        <p className="text-gray-500">아직 저장된 메모가 없습니다.</p>
+        {!isSaving && isSomeoneTyping && (
+          <Typography variant="body2" color="text.secondary" ml={2}>
+            누군가 입력 중입니다...
+          </Typography>
+        )}
+      </Box>
+      {loading ? (
+        <CircularProgress size={24} thickness={4} />
       ) : (
-        <ul className="space-y-2">
-          {savedNotes.map((note) => (
-            <li
-              key={note.id}
-              className="p-3 border rounded bg-white flex justify-between items-start"
-            >
-              <pre className="whitespace-pre-wrap w-full">{note.content}</pre>
-              <button
-                onClick={() => deleteNote(note.id)}
-                className="ml-4 text-red-500 text-sm hover:underline"
-              >
-                삭제
-              </button>
-            </li>
-          ))}
-        </ul>
+        <Slate editor={editor} initialValue={value} onChange={onChange}>
+          <Editable
+            placeholder="여기에 노트를 작성하세요..."
+            style={{
+              minHeight: "300px",
+              fontSize: "1rem",
+              lineHeight: 1.5,
+              outline: "none",
+              border: "none",
+              background: "transparent",
+              width: "100%",
+            }}
+          />
+        </Slate>
       )}
-    </div>
+    </Container>
   );
 }
