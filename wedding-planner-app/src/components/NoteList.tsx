@@ -1,14 +1,29 @@
-import React, { useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { collection, onSnapshot, deleteDoc, doc } from "firebase/firestore";
 import { db } from "../firebase";
 import ReactMarkdown from "react-markdown";
 
 export default function NoteList() {
-  const [notes, setNotes] = useState([]);
+  const [notes, setNotes] = useState<
+    { id: string; content: string; created?: Date }[]
+  >([]);
 
   useEffect(() => {
     const unsub = onSnapshot(collection(db, "notes"), (snapshot) => {
-      const data = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
+      const data = snapshot.docs.map((doc) => {
+        const docData = doc.data();
+        return {
+          id: doc.id,
+          content: docData.content ?? "",
+          created: docData.created
+            ? new Date(
+                docData.created.seconds
+                  ? docData.created.seconds * 1000
+                  : docData.created
+              )
+            : undefined,
+        };
+      });
       setNotes(data);
     });
     return () => unsub();
@@ -20,7 +35,7 @@ export default function NoteList() {
 
   return (
     <div className="p-4">
-      {notes.map((note: any) => (
+      {notes.map((note: { id: string; content: string; created?: Date }) => (
         <div key={note.id} className="mb-4 p-2 border rounded bg-white">
           <ReactMarkdown>{note.content}</ReactMarkdown>
           <button
