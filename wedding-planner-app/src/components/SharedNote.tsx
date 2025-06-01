@@ -2,14 +2,18 @@ import { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import { db } from "../firebase";
 import { doc, onSnapshot, setDoc, serverTimestamp } from "firebase/firestore";
 
-import { createEditor, type BaseText, type Descendant } from "slate";
+import { createEditor, type Descendant } from "slate";
 import { Slate, Editable, withReact } from "slate-react";
 
 import { Container, Box, Typography, CircularProgress } from "@mui/material";
 
 const docId = "shared_note";
 
-const initialValue: BaseText[] = [{ text: "" }];
+type ParagraphElement = { type: "paragraph"; children: Descendant[] };
+
+const initialValue: ParagraphElement[] = [
+  { type: "paragraph", children: [{ text: "" }] },
+];
 
 export default function SharedNote() {
   const [value, setValue] = useState<Descendant[]>(initialValue);
