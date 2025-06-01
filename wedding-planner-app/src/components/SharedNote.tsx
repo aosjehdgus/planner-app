@@ -1,4 +1,11 @@
-import { useEffect, useState, useCallback, useMemo, useRef } from "react";
+import {
+  useEffect,
+  useState,
+  useCallback,
+  useMemo,
+  useRef,
+  Fragment,
+} from "react";
 import { db } from "../firebase";
 import {
   doc,
@@ -29,9 +36,15 @@ import {
   TextField,
   DialogActions,
   Button,
+  Drawer,
+  useMediaQuery,
+  AppBar,
 } from "@mui/material";
+import { useTheme } from "@mui/material/styles";
+
 import DeleteIcon from "@mui/icons-material/Delete";
 import AddIcon from "@mui/icons-material/Add";
+import MenuIcon from "@mui/icons-material/Menu";
 
 type Note = {
   id: string;
@@ -53,20 +66,19 @@ export default function SharedNoteList() {
 
   const [openDialog, setOpenDialog] = useState(false);
   const [newNoteTitle, setNewNoteTitle] = useState("");
+  const [drawerOpen, setDrawerOpen] = useState(false);
 
   const editor = useMemo(() => withReact(createEditor()), []);
   const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   const notesCollectionRef = collection(db, "notes");
-
-  // 현재 선택된 노트 찾기
   const selectedNote = notes.find((n) => n.id === selectedNoteId);
 
-  // 저장 함수 (디바운싱)
+  const theme = useTheme();
+  const isMobile = useMediaQuery(theme.breakpoints.down("sm"));
 
   const scheduleSave = useCallback((noteId: string, content: Descendant[]) => {
     if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
-
     saveTimeoutRef.current = setTimeout(async () => {
       setIsSaving(true);
       await setDoc(
@@ -85,9 +97,6 @@ export default function SharedNoteList() {
     (newValue: Descendant[]) => {
       if (!selectedNoteId) return;
 
-      console.log("Saving note:", selectedNoteId, newValue);
-
-      // 편집 중인 content를 로컬 state에도 저장 (옵션)
       setNotes((prev) =>
         prev.map((note) =>
           note.id === selectedNoteId ? { ...note, content: newValue } : note
@@ -99,30 +108,19 @@ export default function SharedNoteList() {
     [selectedNoteId, scheduleSave]
   );
 
-  // 새 노트 추가
-
-  // 노트 삭제
   const deleteNote = async (id: string) => {
     await deleteDoc(doc(db, "notes", id));
-    if (selectedNoteId === id) {
-      setSelectedNoteId(null);
-    }
+    if (selectedNoteId === id) setSelectedNoteId(null);
   };
 
   const handleOpenDialog = () => {
     setNewNoteTitle("");
     setOpenDialog(true);
   };
-
-  // 다이얼로그 닫기
-  const handleCloseDialog = () => {
-    setOpenDialog(false);
-  };
+  const handleCloseDialog = () => setOpenDialog(false);
 
   const handleAddNote = async () => {
-    if (!newNoteTitle.trim()) return; // 빈값 무시
-
-    // 같은 제목 있으면 숫자 붙이기 (선택사항)
+    if (!newNoteTitle.trim()) return;
     const count = notes.filter((note) =>
       note.title.startsWith(newNoteTitle)
     ).length;
@@ -137,9 +135,9 @@ export default function SharedNoteList() {
 
     setSelectedNoteId(newDoc.id);
     setOpenDialog(false);
+    setDrawerOpen(false); // 모바일에서 닫기
   };
 
-  // Load all notes realtime
   useEffect(() => {
     const unsub = onSnapshot(collection(db, "notes"), (snapshot) => {
       const newNotes: Note[] = snapshot.docs.map((doc) => ({
@@ -152,87 +150,110 @@ export default function SharedNoteList() {
       if (!selectedNoteId && newNotes.length > 0) {
         setSelectedNoteId(newNotes[0].id);
       }
-      setLoading(false); // 이 부분 추가하기!
+      setLoading(false);
     });
 
     return () => unsub();
   }, [selectedNoteId]);
 
-  return (
-    <>
-      <Container
-        gap={2}
-        component={Box}
-        display={"flex"}
-        flexDirection="row"
-        width={"100%"}
-        p={3}
-        height="100vh"
-      >
-        {/* 좌측 노트 리스트 */}
-        <Box
-          width="300px"
-          borderRight="1px solid #ddd"
-          display="flex"
-          flexDirection="column"
-        >
-          <Box
-            p={1}
-            display="flex"
-            justifyContent="space-between"
-            alignItems="center"
-          >
-            <Typography variant="h6">노트 목록</Typography>
-            <IconButton size="small" onClick={handleOpenDialog}>
-              <AddIcon />
-            </IconButton>
-          </Box>
-          {loading ? (
-            <CircularProgress />
-          ) : (
-            <List sx={{ flexGrow: 1, overflowY: "auto" }}>
-              {notes.map(({ id, title }) => (
-                <ListItem
-                  key={id}
-                  sx={{
-                    bgcolor:
-                      id === selectedNoteId
-                        ? "rgba(25, 118, 210, 0.08)"
-                        : "transparent",
-                    "&:hover": {
-                      bgcolor:
-                        id === selectedNoteId
-                          ? "rgba(25, 118, 210, 0.15)"
-                          : "rgba(0,0,0,0.04)",
-                    },
+  const renderNoteList = (
+    <Box
+      width="300px"
+      p={1}
+      display="flex"
+      flexDirection="column"
+      height="100%"
+      sx={{ bgcolor: "#fff" }}
+    >
+      <Box display="flex" justifyContent="space-between" alignItems="center">
+        <Typography variant="h6">노트 목록</Typography>
+        <IconButton size="small" onClick={handleOpenDialog}>
+          <AddIcon />
+        </IconButton>
+      </Box>
+      {loading ? (
+        <CircularProgress />
+      ) : (
+        <List sx={{ flexGrow: 1, overflowY: "auto" }}>
+          {notes.map(({ id, title }) => (
+            <ListItem
+              key={id}
+              sx={{
+                bgcolor:
+                  id === selectedNoteId
+                    ? "rgba(25, 118, 210, 0.08)"
+                    : "transparent",
+                "&:hover": {
+                  bgcolor:
+                    id === selectedNoteId
+                      ? "rgba(25, 118, 210, 0.15)"
+                      : "rgba(0,0,0,0.04)",
+                },
+              }}
+              secondaryAction={
+                <IconButton
+                  edge="end"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    deleteNote(id);
                   }}
-                  secondaryAction={
-                    <IconButton
-                      edge="end"
-                      aria-label="delete"
-                      onClick={(e) => {
-                        e.stopPropagation(); // 클릭 이벤트 버블링 막기
-                        deleteNote(id);
-                      }}
-                    >
-                      <DeleteIcon />
-                    </IconButton>
-                  }
-                  disablePadding
                 >
-                  <ListItemButton
-                    selected={id === selectedNoteId}
-                    onClick={() => setSelectedNoteId(id)}
-                  >
-                    <ListItemText primary={title} />
-                  </ListItemButton>
-                </ListItem>
-              ))}
-            </List>
-          )}
-        </Box>
+                  <DeleteIcon />
+                </IconButton>
+              }
+              disablePadding
+            >
+              <ListItemButton
+                selected={id === selectedNoteId}
+                onClick={() => {
+                  setSelectedNoteId(id);
+                  if (isMobile) setDrawerOpen(false);
+                }}
+              >
+                <ListItemText primary={title} />
+              </ListItemButton>
+            </ListItem>
+          ))}
+        </List>
+      )}
+    </Box>
+  );
 
-        {/* 우측 선택된 노트 편집기 */}
+  return (
+    <Fragment>
+      <Container
+        component={Box}
+        display="flex"
+        flexDirection="row"
+        width="100%"
+        p={3}
+        minHeight="100vh"
+      >
+        {/* 데스크탑에선 고정 LNB */}
+        {!isMobile && renderNoteList}
+
+        <AppBar position="fixed" color="default" elevation={1}>
+          {/* 모바일 햄버거 버튼 */}
+          {isMobile && (
+            <IconButton
+              onClick={() => setDrawerOpen(true)}
+              sx={{ position: "absolute", top: 16, right: 16, zIndex: 1300 }}
+            >
+              <MenuIcon />
+            </IconButton>
+          )}
+        </AppBar>
+
+        {/* 모바일 Drawer */}
+        <Drawer
+          anchor="left"
+          open={drawerOpen}
+          onClose={() => setDrawerOpen(false)}
+        >
+          {renderNoteList}
+        </Drawer>
+
+        {/* 에디터 영역 */}
         <Box flex={1} p={2} display="flex" flexDirection="column">
           <Typography variant="h6" mb={1}>
             {selectedNote?.title || "노트를 선택하세요"}
@@ -271,6 +292,8 @@ export default function SharedNoteList() {
           )}
         </Box>
       </Container>
+
+      {/* 새 노트 다이얼로그 */}
       <Dialog open={openDialog} onClose={handleCloseDialog}>
         <DialogTitle>새 노트 제목 입력</DialogTitle>
         <DialogContent>
@@ -296,6 +319,6 @@ export default function SharedNoteList() {
           </Button>
         </DialogActions>
       </Dialog>
-    </>
+    </Fragment>
   );
 }
